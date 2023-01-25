@@ -1,0 +1,15 @@
+[submodule "microservices/catalog-service"]
+	path = microservices/catalog-service
+	url = https://github.com/bladesibanda/catalog-service
+[submodule "microservices/order-service"]
+	path = microservices/order-service
+	url = https://github.com/bladesibanda/order-service
+[submodule "spring-cloud/edge-service"]
+	path = spring-cloud/edge-service
+	url = https://github.com/bladesibanda/edge-service
+[submodule "spring-cloud/config-service"]
+	path = spring-cloud/config-service
+	url = https://github.com/bladesibanda/config-service
+[submodule "polarbookshop-config-repo"]
+	path = polarbookshop-config-repo
+	url = https://github.com/bladesibanda/polarbookshop-config-repo

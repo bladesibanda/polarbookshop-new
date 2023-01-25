@@ -1,0 +1,158 @@
+name: Commit Stage
+on: push
+
+env:
+  REGISTRY: ghcr.io
+  CATALOG_SERVICE_IMAGE_NAME: bladesibanda/catalog-service
+  ORDER_SERVICE_IMAGE_NAME: bladesibanda/order-service
+  CONFIG_SERVICE_IMAGE_NAME: bladesibanda/config-service
+  EDGE_SERVICE_IMAGE_NAME: bladesibanda/edge-service
+  VERSION: latest
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v3
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - name: Code vulnerability scanning
+        uses: anchore/scan-action@v3
+        id: scan
+        with:
+          path: "${{ github.workspace }}"
+          fail-build: false
+          severity-cutoff: high
+      - name: Upload vulnerability report
+        uses: github/codeql-action/upload-sarif@v2
+        if: success() || failure()
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+      - name: Build, unit tests and integration tests
+        run: |
+          chmod +x gradlew
+          ./gradlew build
+      - name: Validate Kubernetes manifests
+        uses: stefanprodan/kube-tools@v1
+        with:
+          kubectl: 1.24.3
+          kubeval: 0.16.1
+          command: |
+            kubeval --strict -d microservices/catalog-service/k8s
+            kubeval --strict -d microservices/order-service/k8s
+            kubeval --strict -d spring-cloud/config-service/k8s
+            kubeval --strict -d spring-cloud/edge-service/k8s
+  package:
+    name: Package and Publish
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: [ build ]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v3
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - name: Build container images
+        run: |
+          chmod +x gradlew
+          ./gradlew bootJar
+          
+          cd microservices/catalog-service
+          docker build -t ${{ env.REGISTRY }}/${{ env.CATALOG_SERVICE_IMAGE_NAME }}:${{ env.VERSION }} .
+          cd ../../
+          
+          cd microservices/order-service
+          docker build -t ${{ env.REGISTRY }}/${{ env.ORDER_SERVICE_IMAGE_NAME }}:${{ env.VERSION }} .
+          cd ../../
+          
+          cd spring-cloud/edge-service
+          docker build -t ${{ env.REGISTRY }}/${{ env.EDGE_SERVICE_IMAGE_NAME }}:${{ env.VERSION }} .
+          cd ../../
+          
+          cd spring-cloud/config-service
+          docker build -t ${{ env.REGISTRY }}/${{ env.CONFIG_SERVICE_IMAGE_NAME }}:${{ env.VERSION }} .
+          cd ../../
+
+
+      - name: Catalog service image vulnerability scanning
+        uses: anchore/scan-action@v3
+        id: scan_catalog
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.CATALOG_SERVICE_IMAGE_NAME }}:${{ env.VERSION }}
+          fail-build: false
+          severity-cutoff: high
+      - name: Upload catalog service image vulnerability report
+        uses: github/codeql-action/upload-sarif@v2
+        if: success() || failure()
+        with:
+          sarif_file: ${{ steps.scan_catalog.outputs.sarif }}
+
+      - name: Order service image vulnerability scanning
+        uses: anchore/scan-action@v3
+        id: scan_order
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.ORDER_SERVICE_IMAGE_NAME }}:${{ env.VERSION }}
+          fail-build: false
+          severity-cutoff: high
+      - name: Upload order service image vulnerability report
+        uses: github/codeql-action/upload-sarif@v2
+        if: success() || failure()
+        with:
+          sarif_file: ${{ steps.scan_order.outputs.sarif }}
+
+      - name: Config service image vulnerability scanning
+        uses: anchore/scan-action@v3
+        id: scan_config
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.CONFIG_SERVICE_IMAGE_NAME }}:${{ env.VERSION }}
+          fail-build: false
+          severity-cutoff: high
+      - name: Upload config service image vulnerability report
+        uses: github/codeql-action/upload-sarif@v2
+        if: success() || failure()
+        with:
+          sarif_file: ${{ steps.scan_config.outputs.sarif }}
+
+      - name: Edge service image vulnerability scanning
+        uses: anchore/scan-action@v3
+        id: scan_edge
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.EDGE_SERVICE_IMAGE_NAME }}:${{ env.VERSION }}
+          fail-build: false
+          severity-cutoff: high
+      - name: Upload edge service image vulnerability report
+        uses: github/codeql-action/upload-sarif@v2
+        if: success() || failure()
+        with:
+          sarif_file: ${{ steps.scan_edge.outputs.sarif }}
+
+      - name: Log into container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish container images
+        run: docker push ${{ env.REGISTRY }}/${{ env.CATALOG_SERVICE_IMAGE_NAME }}:${{ env.VERSION }} &&
+              docker push ${{ env.REGISTRY }}/${{ env.ORDER_SERVICE_IMAGE_NAME }}:${{ env.VERSION }} &&
+                docker push ${{ env.REGISTRY }}/${{ env.CONFIG_SERVICE_IMAGE_NAME }}:${{ env.VERSION }} &&
+                  docker push ${{ env.REGISTRY }}/${{ env.EDGE_SERVICE_IMAGE_NAME }}:${{ env.VERSION }}
+
+
